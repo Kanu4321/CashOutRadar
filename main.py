@@ -89,11 +89,14 @@ training_df["top_driver"] = [top_driver_for_row(i) for i in range(len(training_d
 
 # Recency of each account: the timestamp of the most recent transaction it
 # was involved in (as sender or receiver). Used to surface the *latest*
-# flagged accounts instead of a static risk-score ranking.
+# flagged accounts instead of a static risk-score ranking. Parsed to real
+# datetimes (not left as raw CSV strings) so sorting is chronologically
+# correct regardless of the exact string format generate.py wrote.
 _txn_times = pd.concat([
     txns_df[["from_account", "timestamp"]].rename(columns={"from_account": "account_id"}),
     txns_df[["to_account", "timestamp"]].rename(columns={"to_account": "account_id"}),
 ])
+_txn_times["timestamp"] = pd.to_datetime(_txn_times["timestamp"], errors="coerce", utc=True)
 _last_activity = _txn_times.groupby("account_id")["timestamp"].max()
 training_df["last_activity"] = training_df["account_id"].map(_last_activity)
 
@@ -102,21 +105,41 @@ training_df["last_activity"] = training_df["account_id"].map(_last_activity)
 _account_row_idx = pd.Series(training_df.index.values, index=training_df["account_id"]).to_dict()
 _last_activity_col = training_df.columns.get_loc("last_activity")
 
+# The synthetic dataset's transaction timestamps can sit anywhere relative
+# to this server's real wall clock (e.g. generate.py may have backdated or
+# future-dated the demo data). Comparing a live "touch" against
+# datetime.now() would then risk making the touched account look OLDER
+# than the dataset, so it would never rise to the top of the alerts list —
+# which is exactly the "count climbs but the list never changes" bug.
+# Instead we keep a monotonically increasing virtual clock, seeded just
+# after the latest timestamp already present in the data, and advance it
+# on every touch. That guarantees a touched account is always the single
+# most recent thing in the table, no matter what the dataset's dates are.
+_max_existing_ts = _txn_times["timestamp"].max()
+_virtual_clock = (
+    _max_existing_ts + pd.Timedelta(seconds=1)
+    if pd.notna(_max_existing_ts)
+    else pd.Timestamp.now(tz="UTC")
+)
+
 
 def touch_accounts(account_ids):
-    """Mark accounts as active *now* so they surface as the latest alerts.
+    """Mark accounts as active *right now* (virtual-clock-wise) so they
+    surface as the latest alerts.
 
     The underlying dataset is static (generated once by generate.py), so
-    without this, /api/alerts would return the exact same 25 accounts on
-    every poll — nothing would ever look "live". Called from the /ws/live
-    feed whenever a (simulated) complaint comes in, using the accounts
-    belonging to that complaint's fraud ring.
+    without this, /api/alerts would return the exact same accounts in the
+    exact same order on every poll — nothing would ever look "live". Called
+    from the /ws/live feed whenever a (simulated) complaint comes in, using
+    the accounts belonging to that complaint's fraud ring.
     """
-    now = datetime.now(timezone.utc).isoformat()
+    global _virtual_clock
+    _virtual_clock = _virtual_clock + pd.Timedelta(seconds=1)
     for acct_id in account_ids:
         row_idx = _account_row_idx.get(acct_id)
         if row_idx is not None:
-            training_df.iat[row_idx, _last_activity_col] = now
+            training_df.iat[row_idx, _last_activity_col] = _virtual_clock
+
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +261,7 @@ def get_alerts(top_k: int = 20, min_score: float = 0.0):
             "account_id": r["account_id"],
             "risk_score": round(float(r["risk_score"]), 4),
             "explanation": r["top_driver"],
-            "flagged_at": None if pd.isna(last_activity) else str(last_activity),
+            "flagged_at": None if pd.isna(last_activity) else pd.Timestamp(last_activity).isoformat(),
             "city": r.get("branch_city_acct", r.get("branch_city")),
             "latitude": r.get("latitude_acct", r.get("latitude")),
             "longitude": r.get("longitude_acct", r.get("longitude")),

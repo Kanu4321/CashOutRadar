@@ -648,7 +648,7 @@ $('liveBtn').addEventListener('click', ()=>{
   ws.onopen = ()=>{ $('liveBtn').textContent = 'Live •'; $('liveBtn').classList.add('live-on'); };
   ws.onclose = ()=>{ $('liveBtn').textContent = 'Go live'; $('liveBtn').classList.remove('live-on'); ws=null; };
   ws.onerror = ()=>{ ws && ws.close(); };
-  ws.onmessage = (ev)=>{
+  ws.onmessage = async (ev)=>{
     const msg = JSON.parse(ev.data);
     if(msg.event === 'new_complaint'){
       complaintsCache.unshift(msg.data);
@@ -680,13 +680,20 @@ $('liveBtn').addEventListener('click', ()=>{
         cashEl.textContent = (parseInt(cashEl.textContent.replace(/,/g, '') || 0) + 1).toLocaleString();
       }
 
-      // 5. Avg Hops (micro-fluctuates naturally around 4.2 - 4.6)
+      // 5. Avg Hops
       const hopsEl = $('statHops');
       if(hopsEl) {
         const currentHops = parseFloat(hopsEl.textContent) || 4.4;
-        const jitter = (Math.random() * 0.2 - 0.1); // +/- 0.1 drift
+        const jitter = (Math.random() * 0.2 - 0.1);
         const updatedHops = Math.min(4.8, Math.max(4.1, currentHops + jitter));
         hopsEl.textContent = updatedHops.toFixed(1);
+      }
+
+      // 6. Refresh Alerts on Overview & Risk Alerts Tab
+      try {
+        await loadAlerts();
+      } catch (err) {
+        console.error("Failed to refresh alerts:", err);
       }
     }
   };

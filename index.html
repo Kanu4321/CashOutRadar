@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cash-out Radar — Cybercrime Ring Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  :root{
+    --bg:#0c111c;
+    --bg-2:#0a0e17;
+    --surface:#141b2c;
+    --surface-raised:#1a2338;
+    --border:#26304a;
+    --border-soft:#1d2740;
+    --text:#e9edf5;
+    --text-dim:#8993ab;
+    --text-faint:#5b6480;
+    --red:#ef5b52;
+    --red-dim:#4a2a2a;
+    --amber:#f2a93b;
+    --green:#3ecf8e;
+    --teal:#4fc3d9;
+    --indigo:#6b7ce6;
+    --radius:3px;
+    --mono:'IBM Plex Mono', ui-monospace, monospace;
+    --display:'Space Grotesk', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(ellipse 1200px 600px at 15% -10%, rgba(79,195,217,0.06), transparent 60%),
+      radial-gradient(ellipse 900px 500px at 100% 0%, rgba(107,124,230,0.05), transparent 55%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--display);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:rgba(79,195,217,0.3);}
+  a{color:inherit;}
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex;align-items:center;gap:20px;
+    padding:16px 28px;
+    border-bottom:1px solid var(--border-soft);
+    background:linear-gradient(180deg, rgba(20,27,44,0.6), transparent);
+  }
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand-mark{
+    width:26px;height:26px;flex:none;position:relative;
+  }
+  .brand-mark svg{width:100%;height:100%;}
+  .brand-text{font-weight:600;font-size:17px;letter-spacing:0.2px;}
+  .brand-sub{font-family:var(--mono);font-size:11px;color:var(--text-faint);margin-top:1px;}
+  .topbar-spacer{flex:1;}
+  .api-config{
+    display:flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:12px;color:var(--text-dim);
+  }
+  .api-config input{
+    background:var(--surface);border:1px solid var(--border);color:var(--text);
+    font-family:var(--mono);font-size:12px;padding:6px 9px;border-radius:var(--radius);
+    width:220px;outline:none;
+  }
+  .api-config input:focus{border-color:var(--teal);}
+  .btn{
+    font-family:var(--mono);font-size:12px;color:var(--text);
+    background:var(--surface-raised);border:1px solid var(--border);
+    padding:6px 12px;border-radius:var(--radius);cursor:pointer;
+    transition:border-color .15s ease, color .15s ease;
+  }
+  .btn:hover{border-color:var(--teal);color:#fff;}
+  .btn.live-on{border-color:var(--green);color:var(--green);}
+  .status-dot{
+    width:7px;height:7px;border-radius:50%;flex:none;
+    background:var(--text-faint);
+  }
+  .status-dot.ok{background:var(--green);box-shadow:0 0 8px rgba(62,207,142,0.7);}
+  .status-dot.bad{background:var(--red);box-shadow:0 0 8px rgba(239,91,82,0.6);}
+  .status-pill{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--text-dim);}
+  .pulse{animation:pulse 1.4s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+
+  /* ---------- Stat strip ---------- */
+  .stats{
+    display:grid;grid-template-columns:repeat(5,1fr);
+    border-bottom:1px solid var(--border-soft);
+  }
+  .stat{
+    padding:18px 24px;border-right:1px solid var(--border-soft);
+  }
+  .stat:last-child{border-right:none;}
+  .stat-label{font-family:var(--mono);font-size:11px;color:var(--text-faint);text-transform:none;letter-spacing:0.3px;}
+  .stat-value{font-size:28px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;}
+  .stat-value.accent-red{color:var(--red);}
+  .stat-value.accent-amber{color:var(--amber);}
+
+  /* ---------- Tabs ---------- */
+  .tabs{
+    display:flex;gap:2px;padding:0 24px;border-bottom:1px solid var(--border-soft);
+    overflow-x:auto;
+  }
+  .tab{
+    font-family:var(--mono);font-size:12.5px;color:var(--text-dim);
+    padding:13px 16px;cursor:pointer;border-bottom:2px solid transparent;
+    white-space:nowrap;
+  }
+  .tab:hover{color:var(--text);}
+  .tab.active{color:var(--text);border-bottom-color:var(--teal);}
+
+  main{padding:24px 28px 60px;max-width:1400px;margin:0 auto;}
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  .section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px;gap:12px;flex-wrap:wrap;}
+  .section-title{font-size:15px;font-weight:600;}
+  .section-note{font-family:var(--mono);font-size:11.5px;color:var(--text-faint);}
+
+  .empty{
+    border:1px dashed var(--border);border-radius:var(--radius);
+    padding:36px 24px;text-align:center;color:var(--text-dim);
+    font-family:var(--mono);font-size:13px;line-height:1.7;
+  }
+  .empty code{color:var(--teal);background:var(--surface-raised);padding:1px 5px;border-radius:2px;}
+  .empty .empty-title{font-family:var(--display);font-size:15px;color:var(--text);font-weight:600;margin-bottom:8px;}
+
+  /* ---------- Two column layout for overview ---------- */
+  .grid-2{display:grid;grid-template-columns:1.15fr 0.85fr;gap:20px;align-items:start;}
+  @media(max-width:980px){.grid-2{grid-template-columns:1fr;}}
+
+  .card{
+    background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);
+    padding:18px 20px;
+  }
+  .card + .card{margin-top:16px;}
+
+  /* ---------- Complaints list ---------- */
+  .list{border:1px solid var(--border-soft);border-radius:var(--radius);overflow:hidden;}
+  .list-row{
+    display:grid;grid-template-columns:130px 1fr 120px 130px 90px;gap:14px;
+    padding:11px 16px;border-bottom:1px solid var(--border-soft);
+    font-size:12.5px;align-items:center;cursor:pointer;
+  }
+  .list-row:last-child{border-bottom:none;}
+  .list-row:hover{background:var(--surface-raised);}
+  .list-row.head{
+    font-family:var(--mono);font-size:10.5px;color:var(--text-faint);cursor:default;
+  }
+  .list-row.head:hover{background:transparent;}
+  .mono{font-family:var(--mono);}
+  .id-chip{color:var(--teal);font-family:var(--mono);font-size:12px;}
+  .loss{color:var(--red);font-variant-numeric:tabular-nums;}
+  .new-row{animation:flashIn .9s ease;}
+  @keyframes flashIn{from{background:rgba(62,207,142,0.18);}to{background:transparent;}}
+
+  /* ---------- Alerts ---------- */
+  .alert-card{
+    display:grid;grid-template-columns:56px 1fr auto;gap:16px;align-items:center;
+    padding:14px 18px;border:1px solid var(--border-soft);border-radius:var(--radius);
+    margin-bottom:8px;
+  }
+  .risk-ring{
+    width:48px;height:48px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:12px;font-weight:600;
+    border:2px solid var(--border);
+  }
+  .alert-acct{font-family:var(--mono);font-size:13px;color:var(--text);}
+  .alert-expl{font-size:12.5px;color:var(--text-dim);margin-top:3px;}
+  .alert-meta{font-family:var(--mono);font-size:11px;color:var(--text-faint);text-align:right;}
+
+  /* ---------- Ring graph ---------- */
+  .graph-wrap{
+    border:1px solid var(--border-soft);border-radius:var(--radius);
+    background:
+      linear-gradient(var(--border-soft) 1px, transparent 1px) 0 0/32px 32px,
+      linear-gradient(90deg, var(--border-soft) 1px, transparent 1px) 0 0/32px 32px,
+      var(--bg-2);
+    height:520px;position:relative;overflow:hidden;
+  }
+  .legend{display:flex;gap:18px;margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--text-dim);flex-wrap:wrap;}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .legend i{width:9px;height:9px;border-radius:50%;display:inline-block;}
+
+  /* ---------- Hotspot grid ---------- */
+  .hotspot-wrap{
+    border:1px solid var(--border-soft);border-radius:var(--radius);background:var(--bg-2);
+  }
+
+  /* ---------- Audit log ---------- */
+  .audit-row{
+    display:grid;grid-template-columns:46px 150px 130px 1fr;gap:14px;
+    padding:9px 16px;border-bottom:1px solid var(--border-soft);
+    font-family:var(--mono);font-size:11.5px;color:var(--text-dim);align-items:center;
+  }
+  .audit-row:last-child{border-bottom:none;}
+  .audit-idx{color:var(--text-faint);}
+  .audit-hash{color:var(--teal);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .verify-banner{
+    display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:var(--radius);
+    font-family:var(--mono);font-size:12.5px;margin-bottom:14px;border:1px solid var(--border-soft);
+  }
+  .verify-banner.ok{border-color:rgba(62,207,142,0.4);color:var(--green);background:rgba(62,207,142,0.06);}
+  .verify-banner.bad{border-color:rgba(239,91,82,0.4);color:var(--red);background:rgba(239,91,82,0.06);}
+
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+
+  select{
+    background:var(--surface-raised);border:1px solid var(--border);color:var(--text);
+    font-family:var(--mono);font-size:12px;padding:6px 9px;border-radius:var(--radius);outline:none;
+  }
+
+  footer{
+    padding:22px 28px;color:var(--text-faint);font-family:var(--mono);font-size:11px;
+    border-top:1px solid var(--border-soft);text-align:center;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">
+      <svg viewBox="0 0 26 26" fill="none">
+        <circle cx="13" cy="13" r="11.5" stroke="#4fc3d9" stroke-width="1.4"/>
+        <circle cx="13" cy="13" r="6.5" stroke="#4fc3d9" stroke-width="1.2" opacity="0.6"/>
+        <circle cx="13" cy="13" r="1.8" fill="#ef5b52"/>
+        <line x1="13" y1="13" x2="21" y2="7" stroke="#ef5b52" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brand-text">Cash-out Radar</div>
+      <div class="brand-sub">NCRP fraud-ring &amp; mule-account console</div>
+    </div>
+  </div>
+  <div class="topbar-spacer"></div>
+  <div class="status-pill"><span class="status-dot" id="connDot"></span><span id="connLabel">not connected</span></div>
+  <div class="api-config">
+    <span>API</span>
+    <input id="apiBase" type="text" value="http://localhost:8000" spellcheck="false" />
+    <button class="btn" id="connectBtn">Connect</button>
+  </div>
+  <button class="btn" id="liveBtn">Go live</button>
+</div>
+
+<div class="stats" id="statsStrip">
+  <div class="stat"><div class="stat-label">complaints filed</div><div class="stat-value" id="statComplaints">—</div></div>
+  <div class="stat"><div class="stat-label">accounts tracked</div><div class="stat-value" id="statAccounts">—</div></div>
+  <div class="stat"><div class="stat-label">transactions</div><div class="stat-value" id="statTxns">—</div></div>
+  <div class="stat"><div class="stat-label">confirmed cash-outs</div><div class="stat-value accent-red" id="statCashouts">—</div></div>
+  <div class="stat"><div class="stat-label">avg hops victim → cash-out</div><div class="stat-value accent-amber" id="statHops">—</div></div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="overview">Overview</div>
+  <div class="tab" data-tab="complaints">Complaints</div>
+  <div class="tab" data-tab="alerts">Risk alerts</div>
+  <div class="tab" data-tab="graph">Ring graph</div>
+  <div class="tab" data-tab="audit">Audit log</div>
+</div>
+
+<main>
+
+  <!-- OVERVIEW -->
+  <div class="panel active" id="panel-overview">
+    <div class="grid-2">
+      <div class="card">
+        <div class="section-head">
+          <div class="section-title">Top risk alerts</div>
+          <div class="section-note">from /api/alerts</div>
+        </div>
+        <div id="overviewAlerts"><div class="empty">Connect to the API to load ranked alerts.</div></div>
+      </div>
+      <div class="card">
+        <div class="section-head">
+          <div class="section-title">Complaint density</div>
+          <div class="section-note">from /api/hotspots</div>
+        </div>
+        <div class="hotspot-wrap" id="hotspotMini" style="height:280px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMPLAINTS -->
+  <div class="panel" id="panel-complaints">
+    <div class="section-head">
+      <div class="section-title">Complaint feed</div>
+      <div class="section-note">click a row to trace its ring — from /api/complaints</div>
+    </div>
+    <div class="list" id="complaintsList">
+      <div class="list-row head">
+        <span>id</span><span>victim / fraud type</span><span>city</span><span>filed</span><span>loss</span>
+      </div>
+    </div>
+    <div id="complaintsEmpty" class="empty" style="margin-top:14px;">Connect to the API to load the complaint feed.</div>
+  </div>
+
+  <!-- ALERTS -->
+  <div class="panel" id="panel-alerts">
+    <div class="section-head">
+      <div class="section-title">Ranked risk alerts</div>
+      <div class="section-note" id="alertsCount">from /api/alerts</div>
+    </div>
+    <div id="alertsList"><div class="empty">Connect to the API to load risk alerts.</div></div>
+  </div>
+
+  <!-- GRAPH -->
+  <div class="panel" id="panel-graph">
+    <div class="section-head">
+      <div class="section-title">Fraud-ring money trail</div>
+      <div class="section-note">
+        <select id="graphComplaintSelect"><option value="">select a complaint…</option></select>
+      </div>
+    </div>
+    <div class="graph-wrap" id="graphWrap">
+      <div class="empty" style="margin:40px auto;max-width:420px;">Pick a complaint above, or click one in the Complaints tab, to trace its money trail from victim to cash-out.</div>
+    </div>
+    <div class="legend">
+      <span><i style="background:#6b7ce6"></i>victim</span>
+      <span><i style="background:#4fc3d9"></i>mule</span>
+      <span><i style="background:#3ecf8e"></i>legit</span>
+      <span><i style="background:#ef5b52"></i>cash-out node</span>
+      <span>edge label = ₹ amount transferred</span>
+    </div>
+  </div>
+
+  <!-- AUDIT -->
+  <div class="panel" id="panel-audit">
+    <div class="section-head">
+      <div class="section-title">Tamper-evident audit log</div>
+      <div class="section-note"><button class="btn" id="verifyBtn">Verify chain</button></div>
+    </div>
+    <div id="verifyResult"></div>
+    <div class="list" id="auditList">
+      <div class="audit-row" style="font-family:var(--mono);font-size:10.5px;color:var(--text-faint);">
+        <span>#</span><span>event</span><span>time</span><span>hash</span>
+      </div>
+    </div>
+    <div id="auditEmpty" class="empty" style="margin-top:14px;">Connect to the API to load the audit log.</div>
+  </div>
+
+</main>
+
+<footer>Cash-out Radar — prototype console. Synthetic demo data only, not a production fraud-detection decision system.</footer>
+
+<script>
+let API_BASE = document.getElementById('apiBase').value.replace(/\/$/,'');
+let ws = null;
+let complaintsCache = [];
+
+const $ = (id) => document.getElementById(id);
+
+// ---------------- tabs ----------------
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click', ()=> switchTab(t.dataset.tab));
+});
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active', p.id === 'panel-'+name));
+}
+
+// ---------------- connection ----------------
+$('connectBtn').addEventListener('click', ()=>{
+  API_BASE = $('apiBase').value.replace(/\/$/,'');
+  loadAll();
+});
+
+async function apiGet(path){
+  const res = await fetch(API_BASE + path);
+  if(!res.ok) throw new Error(res.status + ' ' + res.statusText);
+  return res.json();
+}
+
+function setConnected(ok){
+  $('connDot').className = 'status-dot ' + (ok ? 'ok' : 'bad');
+  $('connLabel').textContent = ok ? 'connected' : 'connection failed';
+}
+
+async function loadAll(){
+  $('connDot').className = 'status-dot pulse';
+  $('connLabel').textContent = 'connecting…';
+  try{
+    await loadStats();
+    setConnected(true);
+    await Promise.all([loadComplaints(), loadAlerts(), loadHotspots(), loadAuditLog()]);
+  }catch(e){
+    setConnected(false);
+    console.error(e);
+  }
+}
+
+// ---------------- stats ----------------
+async function loadStats(){
+  const s = await apiGet('/api/stats');
+  $('statComplaints').textContent = s.total_complaints.toLocaleString();
+  $('statAccounts').textContent = s.total_accounts.toLocaleString();
+  $('statTxns').textContent = s.total_transactions.toLocaleString();
+  $('statCashouts').textContent = s.confirmed_cashouts.toLocaleString();
+  $('statHops').textContent = s.avg_hops_to_cashout;
+}
+
+// ---------------- complaints ----------------
+async function loadComplaints(){
+  const rows = await apiGet('/api/complaints?limit=100');
+  complaintsCache = rows;
+  renderComplaints(rows);
+  populateGraphSelect(rows);
+}
+
+function fmtMoney(n){
+  return '₹' + Number(n).toLocaleString('en-IN', {maximumFractionDigits:0});
+}
+function fmtTime(t){
+  try{ return new Date(t).toLocaleString('en-IN', {month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit'}); }
+  catch(e){ return t; }
+}
+
+function renderComplaints(rows, prependNew){
+  const list = $('complaintsList');
+  $('complaintsEmpty').style.display = rows.length ? 'none' : 'block';
+  if(!prependNew){
+    list.querySelectorAll('.list-row:not(.head)').forEach(r=>r.remove());
+  }
+  const frag = document.createDocumentFragment();
+  const toRender = prependNew ? [prependNew] : rows;
+  toRender.forEach(c=>{
+    const row = document.createElement('div');
+    row.className = 'list-row' + (prependNew ? ' new-row' : '');
+    row.innerHTML = `
+      <span class="id-chip">${c.complaint_id}</span>
+      <span>${c.victim_account} — <span style="color:var(--text-dim)">${c.fraud_type}</span></span>
+      <span>${c.victim_city || '—'}</span>
+      <span class="mono">${fmtTime(c.filed_at)}</span>
+      <span class="loss">${fmtMoney(c.reported_loss)}</span>
+    `;
+    row.addEventListener('click', ()=>{
+      switchTab('graph');
+      $('graphComplaintSelect').value = c.complaint_id;
+      loadRingGraph(c.complaint_id);
+    });
+    frag.appendChild(row);
+  });
+  if(prependNew){ list.insertBefore(frag, list.children[1]); }
+  else{ list.appendChild(frag); }
+}
+
+// ---------------- alerts ----------------
+function riskColor(score){
+  if(score >= 0.7) return 'var(--red)';
+  if(score >= 0.4) return 'var(--amber)';
+  return 'var(--green)';
+}
+
+async function loadAlerts(){
+  const data = await apiGet('/api/alerts?top_k=25');
+  $('alertsCount').textContent = data.count + ' accounts flagged — from /api/alerts';
+  renderAlerts(data.alerts, $('alertsList'));
+  renderAlerts(data.alerts.slice(0,6), $('overviewAlerts'));
+}
+
+function renderAlerts(alerts, target){
+  target.innerHTML = '';
+  if(!alerts.length){
+    target.innerHTML = '<div class="empty">No alerts above the current threshold.</div>';
+    return;
+  }
+  alerts.forEach(a=>{
+    const pct = Math.round(a.risk_score*100);
+    const card = document.createElement('div');
+    card.className = 'alert-card';
+    card.innerHTML = `
+      <div class="risk-ring" style="border-color:${riskColor(a.risk_score)};color:${riskColor(a.risk_score)}">${pct}%</div>
+      <div>
+        <div class="alert-acct">${a.account_id}</div>
+        <div class="alert-expl">${a.explanation}</div>
+      </div>
+      <div class="alert-meta">${a.bank || ''}<br>${a.city || ''}</div>
+    `;
+    target.appendChild(card);
+  });
+}
+
+// ---------------- ring graph (d3-force) ----------------
+$('graphComplaintSelect').addEventListener('change', (e)=>{
+  if(e.target.value) loadRingGraph(e.target.value);
+});
+
+function populateGraphSelect(rows){
+  const sel = $('graphComplaintSelect');
+  sel.innerHTML = '<option value="">select a complaint…</option>';
+  rows.forEach(c=>{
+    const opt = document.createElement('option');
+    opt.value = c.complaint_id;
+    opt.textContent = `${c.complaint_id} — ${c.fraud_type}`;
+    sel.appendChild(opt);
+  });
+}
+
+const nodeColor = (type)=>({
+  victim:'#6b7ce6', mule:'#4fc3d9', legit:'#3ecf8e', cashout_node:'#ef5b52'
+}[type] || '#8993ab');
+
+async function loadRingGraph(complaintId){
+  const wrap = $('graphWrap');
+  wrap.innerHTML = '<div class="empty" style="margin:40px auto;max-width:300px;">Loading ring…</div>';
+  try{
+    const data = await apiGet(`/api/complaints/${complaintId}/graph`);
+    drawGraph(data);
+  }catch(e){
+    wrap.innerHTML = `<div class="empty" style="margin:40px auto;max-width:420px;">Couldn't load a graph for <code>${complaintId}</code>. ${e.message}</div>`;
+  }
+}
+
+function drawGraph(data){
+  const wrap = $('graphWrap');
+  wrap.innerHTML = '';
+  const width = wrap.clientWidth, height = wrap.clientHeight;
+
+  const svg = d3.select(wrap).append('svg')
+    .attr('width', width).attr('height', height);
+
+  const nodes = data.nodes.map(n=>({...n}));
+  const links = data.links.map(l=>({...l}));
+
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d=>d.id).distance(120).strength(0.6))
+    .force('charge', d3.forceManyBody().strength(-260))
+    .force('center', d3.forceCenter(width/2, height/2))
+    .force('collide', d3.forceCollide(30));
+
+  svg.append('defs').append('marker')
+    .attr('id','arrow').attr('viewBox','0 -5 10 10').attr('refX',24).attr('refY',0)
+    .attr('markerWidth',6).attr('markerHeight',6).attr('orient','auto')
+    .append('path').attr('d','M0,-5L10,0L0,5').attr('fill','#3a4562');
+
+  const link = svg.append('g').selectAll('line').data(links).join('line')
+    .attr('stroke', d=> d.is_cashout ? '#ef5b52' : '#3a4562')
+    .attr('stroke-width', d=> d.is_cashout ? 2 : 1.3)
+    .attr('marker-end','url(#arrow)');
+
+  const linkLabel = svg.append('g').selectAll('text').data(links).join('text')
+    .attr('font-family','IBM Plex Mono').attr('font-size',10).attr('fill','#7c879d')
+    .text(d=> '₹' + Number(d.amount).toLocaleString('en-IN', {maximumFractionDigits:0}));
+
+  const node = svg.append('g').selectAll('circle').data(nodes).join('circle')
+    .attr('r', d=> d.type==='victim' || d.type==='cashout_node' ? 14 : 11)
+    .attr('fill', d=>nodeColor(d.type))
+    .attr('stroke', '#0c111c').attr('stroke-width', 2)
+    .call(drag(sim));
+
+  const label = svg.append('g').selectAll('text').data(nodes).join('text')
+    .attr('font-family','IBM Plex Mono').attr('font-size',9.5).attr('fill','#e9edf5')
+    .attr('text-anchor','middle').attr('dy', 26)
+    .text(d=> d.type + '\n' + d.id.slice(-5));
+
+  node.append('title').text(d=>`${d.id}\n${d.type}\nrisk ${Math.round((d.risk_score||0)*100)}%\n${d.bank||''} · ${d.city||''}`);
+
+  sim.on('tick', ()=>{
+    link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+        .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+    linkLabel.attr('x', d=>(d.source.x+d.target.x)/2).attr('y', d=>(d.source.y+d.target.y)/2 - 4);
+    node.attr('cx',d=>d.x).attr('cy',d=>d.y);
+    label.attr('x',d=>d.x).attr('y',d=>d.y);
+  });
+
+  function drag(sim){
+    function started(event,d){ if(!event.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; }
+    function dragged(event,d){ d.fx=event.x; d.fy=event.y; }
+    function ended(event,d){ if(!event.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }
+    return d3.drag().on('start',started).on('drag',dragged).on('end',ended);
+  }
+}
+
+// ---------------- hotspots ----------------
+async function loadHotspots(){
+  const data = await apiGet('/api/hotspots?grid_size=40');
+  drawHotspots(data.points, $('hotspotMini'));
+}
+
+function drawHotspots(points, container){
+  container.innerHTML = '';
+  const width = container.clientWidth, height = container.clientHeight;
+  const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+
+  const latMin=6, latMax=37, lonMin=68, lonMax=97;
+  const x = d3.scaleLinear().domain([lonMin,lonMax]).range([24, width-16]);
+  const y = d3.scaleLinear().domain([latMax,latMin]).range([16, height-24]);
+  const color = d3.scaleLinear().domain([0,1]).range(['#1c3a4a', '#ef5b52']);
+
+  svg.append('rect').attr('x',x(lonMin)).attr('y',y(latMax)).attr('width', x(lonMax)-x(lonMin)).attr('height', y(latMin)-y(latMax))
+    .attr('fill','none').attr('stroke','#26304a');
+
+  svg.selectAll('circle').data(points).join('circle')
+    .attr('cx', d=>x(d.longitude)).attr('cy', d=>y(d.latitude))
+    .attr('r', d=> 2 + d.intensity*7)
+    .attr('fill', d=>color(d.intensity))
+    .attr('opacity', 0.85);
+
+  svg.append('text').attr('x', x(lonMin)).attr('y', height-4)
+    .attr('font-family','IBM Plex Mono').attr('font-size',9).attr('fill','#5b6480')
+    .text('lat 6–37°N · lon 68–97°E — intensity from kernel density of complaint locations');
+}
+
+// ---------------- audit log ----------------
+async function loadAuditLog(){
+  const data = await apiGet('/api/audit-log?limit=100');
+  const list = $('auditList');
+  $('auditEmpty').style.display = data.count ? 'none' : 'block';
+  list.querySelectorAll('.audit-row:not(:first-child)').forEach(r=>r.remove());
+  const frag = document.createDocumentFragment();
+  data.entries.slice().reverse().forEach(e=>{
+    const row = document.createElement('div');
+    row.className = 'audit-row';
+    row.innerHTML = `<span class="audit-idx">${e.index}</span><span>${e.event_type}</span><span>${fmtTime(e.timestamp)}</span><span class="audit-hash">${e.hash}</span>`;
+    frag.appendChild(row);
+  });
+  list.appendChild(frag);
+}
+
+$('verifyBtn').addEventListener('click', async ()=>{
+  const banner = $('verifyResult');
+  banner.innerHTML = `<div class="verify-banner">verifying chain…</div>`;
+  try{
+    const r = await apiGet('/api/audit-log/verify');
+    if(r.valid){
+      banner.innerHTML = `<div class="verify-banner ok">✓ chain intact — ${r.entries_checked} entries checked, no tampering detected</div>`;
+    }else{
+      banner.innerHTML = `<div class="verify-banner bad">✗ chain broken at entry #${r.broken_at_index}</div>`;
+    }
+  }catch(e){
+    banner.innerHTML = `<div class="verify-banner bad">Couldn't reach /api/audit-log/verify — ${e.message}</div>`;
+  }
+  await loadAuditLog();
+});
+
+// ---------------- live feed ----------------
+$('liveBtn').addEventListener('click', ()=>{
+  if(ws){ ws.close(); return; }
+  const wsBase = API_BASE.replace(/^http/, 'ws');
+  ws = new WebSocket(wsBase + '/ws/live');
+  ws.onopen = ()=>{ $('liveBtn').textContent = 'Live •'; $('liveBtn').classList.add('live-on'); };
+  ws.onclose = ()=>{ $('liveBtn').textContent = 'Go live'; $('liveBtn').classList.remove('live-on'); ws=null; };
+  ws.onerror = ()=>{ ws && ws.close(); };
+  ws.onmessage = (ev)=>{
+    const msg = JSON.parse(ev.data);
+    if(msg.event === 'new_complaint'){
+      complaintsCache.unshift(msg.data);
+      renderComplaints(complaintsCache, msg.data);
+      loadStats().catch(()=>{});
+    }
+  };
+});
+
+// ---------------- boot ----------------
+loadAll();
+window.addEventListener('resize', ()=>{}); // graphs redraw on next data load
+</script>
+
+</body>
+</html>

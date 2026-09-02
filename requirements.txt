@@ -1,0 +1,17 @@
+# Step 1: generate the synthetic dataset
+pandas
+networkx
+matplotlib
+faker
+
+# Step 2 (train_model.py) + Step 3 (main.py API)
+numpy
+scikit-learn
+xgboost
+joblib
+fastapi
+uvicorn[standard]
+shap
+
+# Optional: only needed if you run neo4j_load.py
+# neo4j

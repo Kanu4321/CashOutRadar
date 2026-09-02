@@ -87,6 +87,16 @@ def top_driver_for_row(i):
 
 training_df["top_driver"] = [top_driver_for_row(i) for i in range(len(training_df))]
 
+# Recency of each account: the timestamp of the most recent transaction it
+# was involved in (as sender or receiver). Used to surface the *latest*
+# flagged accounts instead of a static risk-score ranking.
+_txn_times = pd.concat([
+    txns_df[["from_account", "timestamp"]].rename(columns={"from_account": "account_id"}),
+    txns_df[["to_account", "timestamp"]].rename(columns={"to_account": "account_id"}),
+])
+_last_activity = _txn_times.groupby("account_id")["timestamp"].max()
+training_df["last_activity"] = training_df["account_id"].map(_last_activity)
+
 # ---------------------------------------------------------------------------
 # Simple hash-chained audit log (blockchain-concept demo, not real Fabric)
 # ---------------------------------------------------------------------------
@@ -185,8 +195,14 @@ def get_complaint_graph(complaint_id: str):
 
 @app.get("/api/alerts")
 def get_alerts(top_k: int = 20, min_score: float = 0.0):
+    """Most recently flagged accounts above min_score, newest first.
+
+    This intentionally is NOT a risk-score ranking — order reflects when the
+    account was last active (its most recent transaction), not how risky it
+    is. The risk_score is still returned per-alert for context/coloring.
+    """
     df = training_df[training_df["risk_score"] >= min_score].copy()
-    df = df.sort_values("risk_score", ascending=False).head(top_k)
+    df = df.sort_values("last_activity", ascending=False, na_position="last").head(top_k)
 
     merged = df.merge(
         accounts_df[["account_id", "branch_city", "latitude", "longitude", "bank"]],
@@ -195,10 +211,12 @@ def get_alerts(top_k: int = 20, min_score: float = 0.0):
 
     alerts = []
     for _, r in merged.iterrows():
+        last_activity = r.get("last_activity")
         alerts.append({
             "account_id": r["account_id"],
             "risk_score": round(float(r["risk_score"]), 4),
             "explanation": r["top_driver"],
+            "flagged_at": None if pd.isna(last_activity) else str(last_activity),
             "city": r.get("branch_city_acct", r.get("branch_city")),
             "latitude": r.get("latitude_acct", r.get("latitude")),
             "longitude": r.get("longitude_acct", r.get("longitude")),

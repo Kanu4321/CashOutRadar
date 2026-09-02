@@ -97,6 +97,28 @@ _txn_times = pd.concat([
 _last_activity = _txn_times.groupby("account_id")["timestamp"].max()
 training_df["last_activity"] = training_df["account_id"].map(_last_activity)
 
+# account_id -> row index in training_df, so the live feed can cheaply
+# bump last_activity in place without re-scanning the whole table.
+_account_row_idx = pd.Series(training_df.index.values, index=training_df["account_id"]).to_dict()
+_last_activity_col = training_df.columns.get_loc("last_activity")
+
+
+def touch_accounts(account_ids):
+    """Mark accounts as active *now* so they surface as the latest alerts.
+
+    The underlying dataset is static (generated once by generate.py), so
+    without this, /api/alerts would return the exact same 25 accounts on
+    every poll — nothing would ever look "live". Called from the /ws/live
+    feed whenever a (simulated) complaint comes in, using the accounts
+    belonging to that complaint's fraud ring.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    for acct_id in account_ids:
+        row_idx = _account_row_idx.get(acct_id)
+        if row_idx is not None:
+            training_df.iat[row_idx, _last_activity_col] = now
+
+
 # ---------------------------------------------------------------------------
 # Simple hash-chained audit log (blockchain-concept demo, not real Fabric)
 # ---------------------------------------------------------------------------
@@ -282,6 +304,17 @@ async def live_feed(websocket: WebSocket):
         while True:
             record = records[i % len(records)]
             append_audit("complaint_received", {"complaint_id": record["complaint_id"]})
+
+            # Bump activity for this complaint's ring so it actually rises
+            # to the top of /api/alerts (latest-first) on the next poll —
+            # otherwise the "latest" list would never change.
+            ring_id = record.get("ring_id")
+            if ring_id is not None:
+                ring_txns = txns_df[txns_df.get("ring_id") == ring_id]
+                if not ring_txns.empty:
+                    ring_accounts = pd.unique(ring_txns[["from_account", "to_account"]].values.ravel())
+                    touch_accounts(ring_accounts)
+
             await websocket.send_json({"event": "new_complaint", "data": record})
             i += 1
             await asyncio.sleep(3)

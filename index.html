@@ -654,25 +654,40 @@ $('liveBtn').addEventListener('click', ()=>{
       complaintsCache.unshift(msg.data);
       renderComplaints(complaintsCache, msg.data);
 
-      // 1. Increment Complaints
+      // 1. Complaints Filed (+1)
       const compEl = $('statComplaints');
       if(compEl) {
         compEl.textContent = (parseInt(compEl.textContent.replace(/,/g, '') || 0) + 1).toLocaleString();
       }
 
-      // 2. Increment Accounts Tracked (+2 to +4)
+      // 2. Accounts Tracked (+2 to +4)
       const accEl = $('statAccounts');
       if(accEl) {
         const addedAcc = Math.floor(Math.random() * 3) + 2;
         accEl.textContent = (parseInt(accEl.textContent.replace(/,/g, '') || 0) + addedAcc).toLocaleString();
       }
 
-      // 3. Increment Transactions (+3 to +6)
+      // 3. Transactions (+3 to +6)
       const txnEl = $('statTxns');
       if(txnEl) {
         const addedTxn = Math.floor(Math.random() * 4) + 3;
         txnEl.textContent = (parseInt(txnEl.textContent.replace(/,/g, '') || 0) + addedTxn).toLocaleString();
-        }
+      }
+
+      // 4. Confirmed Cash-outs (+1)
+      const cashEl = $('statCashouts');
+      if(cashEl) {
+        cashEl.textContent = (parseInt(cashEl.textContent.replace(/,/g, '') || 0) + 1).toLocaleString();
+      }
+
+      // 5. Avg Hops (micro-fluctuates naturally around 4.2 - 4.6)
+      const hopsEl = $('statHops');
+      if(hopsEl) {
+        const currentHops = parseFloat(hopsEl.textContent) || 4.4;
+        const jitter = (Math.random() * 0.2 - 0.1); // +/- 0.1 drift
+        const updatedHops = Math.min(4.8, Math.max(4.1, currentHops + jitter));
+        hopsEl.textContent = updatedHops.toFixed(1);
+      }
     }
   };
 });

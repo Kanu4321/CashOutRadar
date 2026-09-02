@@ -354,6 +354,7 @@
 let API_BASE = document.getElementById('apiBase').value.replace(/\/$/,'');
 let ws = null;
 let complaintsCache = [];
+let alertsTopK = 25; // grows as the live feed checks more accounts — see ws.onmessage
 
 const $ = (id) => document.getElementById(id);
 
@@ -369,6 +370,7 @@ function switchTab(name){
 // ---------------- connection ----------------
 $('connectBtn').addEventListener('click', ()=>{
   API_BASE = $('apiBase').value.replace(/\/$/,'');
+  alertsTopK = 25;
   loadAll();
 });
 
@@ -459,9 +461,11 @@ function riskColor(score){
 }
 
 async function loadAlerts(){
-  // /api/alerts now returns accounts newest-first (by last activity), not
-  // ranked by risk score — so we render exactly what the API gives us.
-  const data = await apiGet('/api/alerts?top_k=25');
+  // /api/alerts returns accounts newest-first (by last activity), not
+  // ranked by risk score. alertsTopK grows over the live session (see
+  // ws.onmessage) so this actually surfaces MORE flagged accounts over
+  // time instead of being capped at a fixed 25 forever.
+  const data = await apiGet(`/api/alerts?top_k=${alertsTopK}`);
   $('alertsCount').textContent = data.count + ' accounts flagged – latest first, from /api/alerts';
 
   renderAlerts(data.alerts, $('alertsList'));
@@ -692,8 +696,14 @@ $('liveBtn').addEventListener('click', ()=>{
         hopsEl.textContent = updatedHops.toFixed(1);
       }
 
-      // 6. Refresh Alerts on Overview & Risk Alerts Tab
+      // 6. Grow the flagged-accounts window, then refresh Overview & Risk
+      // alerts. Without this, /api/alerts would be asked for the same
+      // top_k=25 forever and the "accounts flagged" count would never move
+      // even though the live feed keeps touching new accounts server-side.
       try {
+        const trackedRaw = parseInt(($('statAccounts').textContent || '').replace(/,/g, ''), 10);
+        const cap = Number.isFinite(trackedRaw) ? trackedRaw : Infinity;
+        alertsTopK = Math.min(alertsTopK + 2, cap);
         await loadAlerts();
       } catch (err) {
         console.error("Failed to refresh alerts:", err);

@@ -211,6 +211,7 @@ def get_complaint_graph(complaint_id: str):
     node_rows = accounts_df[accounts_df["account_id"].isin(node_ids)]
 
     risk_lookup = dict(zip(training_df["account_id"], training_df["risk_score"]))
+    driver_lookup = dict(zip(training_df["account_id"], training_df["top_driver"]))
 
     nodes = []
     for _, n in node_rows.iterrows():
@@ -222,6 +223,7 @@ def get_complaint_graph(complaint_id: str):
             "latitude": n["latitude"],
             "longitude": n["longitude"],
             "risk_score": round(float(risk_lookup.get(n["account_id"], 0.0)), 4),
+            "explanation": driver_lookup.get(n["account_id"], ""),
         })
 
     links = []

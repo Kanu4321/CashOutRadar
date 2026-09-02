@@ -458,11 +458,49 @@ function riskColor(score){
   return 'var(--green)';
 }
 
+// async function loadAlerts(){
+//   const data = await apiGet('/api/alerts?top_k=25');
+//   $('alertsCount').textContent = data.count + ' accounts flagged — from /api/alerts';
+//   renderAlerts(data.alerts, $('alertsList'));
+//   renderAlerts(data.alerts.slice(0,6), $('overviewAlerts'));
+// }
+
 async function loadAlerts(){
-  const data = await apiGet('/api/alerts?top_k=25');
-  $('alertsCount').textContent = data.count + ' accounts flagged — from /api/alerts';
-  renderAlerts(data.alerts, $('alertsList'));
-  renderAlerts(data.alerts.slice(0,6), $('overviewAlerts'));
+  const alerts = await api('/api/alerts');
+  alertsCache = alerts;
+
+  // Score se sorting band: latest jo aayega wo sabse upar rahega
+  // Agar timestamp hai toh uske hisaab se sort, warna incoming order reverse (latest on top)
+  const latestAlerts = [...alerts].reverse();
+
+  // Overview panel update
+  const top = latestAlerts.slice(0, 6);
+  $('topAlertsList').innerHTML = top.map(a => `
+    <div class="alert-item" onclick="openAccountModal('${a.account_id}')">
+      <div class="alert-item-left">
+        <span class="badge-dot ${badgeClass(a.risk_score)}"></span>
+        <div class="truncate">
+          <div class="mono alert-acc">${a.account_id}</div>
+          <div class="alert-reason">${a.explanation || 'Suspicious routing pattern'}</div>
+        </div>
+      </div>
+      <div class="alert-score ${scoreColor(a.risk_score)}">${Math.round(a.risk_score * 100)}%</div>
+    </div>
+  `).join('');
+
+  // Risk Alerts tab table update
+  const tbody = $('alertsTableBody');
+  if(tbody){
+    tbody.innerHTML = latestAlerts.map(a => `
+      <tr onclick="openAccountModal('${a.account_id}')">
+        <td class="mono font-semibold">${a.account_id}</td>
+        <td><span class="badge ${badgeClass(a.risk_score)}">${Math.round(a.risk_score * 100)}%</span></td>
+        <td>${a.bank || 'Unknown'}</td>
+        <td>${a.city || 'N/A'}</td>
+        <td class="text-secondary">${a.explanation || 'Flagged by ML engine'}</td>
+      </tr>
+    `).join('');
+  }
 }
 
 function renderAlerts(alerts, target){

@@ -1,76 +1,98 @@
 """
-Synthetic dataset generator for the Cybercrime Cash-out Prediction prototype.
+Synthetic dataset generator matching the schema of the real dataset used
+for training: IBM "Transactions for Anti-Money-Laundering (AML)" on
+Kaggle (https://www.kaggle.com/datasets/ealtman2019/ibm-transactions-for-anti-money-laundering-aml).
 
-Produces a fake-but-structurally-realistic version of what NCRP + CFCFRMS
-data would look like: accounts, transactions (legit + fraud mule chains),
-complaints, and ground-truth cash-out events. This is NOT real data and
-is only meant to let the graph/ML pipeline be built and demoed.
+This does NOT reproduce real data - it generates new, fake transactions,
+accounts, and laundering patterns, but in the exact file/column layout
+that train_model_real.py expects, so the same training script can run
+unmodified against either the real Kaggle files or this synthetic
+stand-in (useful for development/demo without needing the real dataset
+downloaded, and for testing changes to the pipeline safely).
 
-Outputs (CSV) written to ./output:
-  accounts.csv       - every account/wallet node in the graph
-  transactions.csv   - every transaction edge (legit + fraud)
-  complaints.csv      - NCRP-style complaint records
-  cashouts.csv        - ground truth: which account/txn was the cash-out point
-  example_ring.png    - visualization of one fraud ring's mule chain
+Outputs written to ./kaggle_data (same directory train_model_real.py
+reads from by default):
+
+  HI-Small_Trans.csv      - every transaction (legit + laundering), columns:
+                             Timestamp, From Bank, From Account, To Bank,
+                             To Account, Amount Received, Receiving Currency,
+                             Amount Paid, Payment Currency, Payment Format,
+                             Is Laundering
+  HI-Small_accounts.csv   - one row per account: Bank ID, Account Number,
+                             Bank Name, Country (Country is extra context,
+                             harmless - train_model_real.py only reads the
+                             first three)
+  HI-Small_Patterns.txt   - BEGIN/END LAUNDERING ATTEMPT blocks, each
+                             listing the transaction rows (same 11 fields,
+                             comma-separated, no header) that make up that
+                             laundering chain - this is what
+                             train_model_real.py parses for ground truth
+
+Money-trail structure is unchanged from the original generator: victim
+account -> mule hop -> mule hop -> ... -> cash-out (terminal) account,
+where only the terminal account receives without forwarding the money
+onward within that laundering attempt. That's exactly the pattern
+train_model_real.py's ground-truth parser looks for (received but never
+sent within the same attempt = cash-out / terminal node).
+
+Run:
+  pip install pandas faker
+  python3 generate.py
 """
 
+import os
 import random
 import uuid
-import json
 from datetime import datetime, timedelta
 
 import pandas as pd
-import networkx as nx
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from faker import Faker
 
 random.seed(42)
-fake = Faker("en_IN")
+fake = Faker("en_US")
 Faker.seed(42)
 
 # ---------------------------------------------------------------------------
-# Reference data
+# Config
 # ---------------------------------------------------------------------------
 
-CITIES = [
-    ("Delhi", 28.6139, 77.2090),
-    ("Mumbai", 19.0760, 72.8777),
-    ("Bengaluru", 12.9716, 77.5946),
-    ("Hyderabad", 17.3850, 78.4867),
-    ("Jaipur", 26.9124, 75.7873),
-    ("Lucknow", 26.8467, 80.9462),
-    ("Patna", 25.5941, 85.1376),
-    ("Ranchi", 23.3441, 85.3096),
-    ("Guwahati", 26.1445, 91.7362),
-    ("Kolkata", 22.5726, 88.3639),
-    ("Ahmedabad", 23.0225, 72.5714),
-    ("Chennai", 13.0827, 80.2707),
-    ("Jalandhar", 31.3260, 75.5762),
-    ("Bhopal", 23.2599, 77.4126),
-    ("Nagpur", 21.1458, 79.0882),
-]
+OUT_DIR = os.environ.get("OUT_DIR", "kaggle_data")
+DATASET_PREFIX = os.environ.get("DATASET_PREFIX", "HI-Small")
 
-BANKS = ["SBI", "HDFC", "ICICI", "PNB", "Axis", "Kotak", "BoB", "Canara", "IndusInd", "Union Bank"]
-
-FRAUD_TYPES = [
-    "Investment fraud",
-    "Digital arrest scam",
-    "KYC update fraud",
-    "Loan app fraud",
-    "Job/task fraud",
-    "OTP/phishing fraud",
-]
-
-CHANNELS = ["UPI", "IMPS", "NEFT", "RTGS"]
-
-N_LEGIT_ACCOUNTS = 800
-N_LEGIT_TXNS = 2500
-N_FRAUD_RINGS = 60          # each ring = one complaint's money trail
+N_BANKS = 250
+N_LEGIT_ACCOUNTS = 1800
+N_LEGIT_TXNS = 9000
+N_LAUNDERING_ATTEMPTS = 90     # each = one fraud ring / one complaint's money trail
 MIN_HOPS, MAX_HOPS = 3, 6
 START_DATE = datetime(2026, 1, 1)
 END_DATE = datetime(2026, 8, 31)
+
+# Same country list train_model_real.py's bank_to_country() recognizes,
+# so the hotspot model can actually geo-locate these accounts later.
+COUNTRIES = [
+    "germany", "switzerland", "china", "france", "india", "israel", "uk",
+    "italy", "japan", "spain", "australia", "canada", "russia", "mexico",
+    "saudi arabia", "netherlands", "brazil", "belgium", "austria",
+    "greece", "portugal", "ireland",
+]
+# usa is handled separately (bank_to_country() detects it from phrases
+# like "First Bank of X" / "National Bank of X" rather than a country name)
+USA_WEIGHT = 0.30       # fraction of non-crypto banks that are US-style
+CRYPTO_WEIGHT = 0.03    # fraction of banks that are "Crytpo Bank" (sic -
+                         # this typo is a real quirk of the source dataset,
+                         # kept here on purpose for schema fidelity)
+
+CURRENCIES = [
+    "US Dollar", "Euro", "Yuan", "Yen", "UK Pound", "Rupee", "Ruble",
+    "Swiss Franc", "Australian Dollar", "Canadian Dollar", "Mexican Peso",
+    "Brazil Real", "Saudi Riyal", "Shekel", "Bitcoin",
+]
+PAYMENT_FORMATS = ["ACH", "Wire", "Credit Card", "Cheque", "Cash", "Reinvestment", "Bitcoin"]
+
+FRAUD_TYPES = [
+    "Investment fraud", "Digital arrest scam", "KYC update fraud",
+    "Loan app fraud", "Job/task fraud", "OTP/phishing fraud",
+]
 
 
 def random_time(start=START_DATE, end=END_DATE):
@@ -78,203 +100,235 @@ def random_time(start=START_DATE, end=END_DATE):
     return start + timedelta(seconds=random.randint(0, int(delta.total_seconds())))
 
 
-def jitter_location(lat, lon, km=15):
-    # ~0.009 deg latitude per km
-    d = km / 111.0
-    return lat + random.uniform(-d, d), lon + random.uniform(-d, d)
+def fmt_ts(dt):
+    return dt.strftime("%Y/%m/%d %H:%M")
 
 
-def new_account(acct_type, city=None, opened_before=None):
-    city = city or random.choice(CITIES)
-    city_name, lat, lon = city
-    lat, lon = jitter_location(lat, lon)
-    if opened_before is None:
-        opened_before = END_DATE
-    account_age_days = random.randint(5, 3650) if acct_type != "mule" else random.randint(1, 120)
-    opened_on = opened_before - timedelta(days=account_age_days)
+# ---------------------------------------------------------------------------
+# 1. Bank pool - fixed (bank_id, bank_name, country) triples, matching the
+#    real dataset's Bank Name conventions closely enough for
+#    bank_to_country() in train_model_real.py to classify correctly.
+# ---------------------------------------------------------------------------
+
+US_CITIES = [fake.city() for _ in range(40)]
+US_PATTERNS = [
+    "First Bank of {city}", "National Bank of {city}",
+    "{city} Savings Bank", "{city} Cooperative Bank",
+]
+
+
+def make_bank(bank_id):
+    roll = random.random()
+    if roll < CRYPTO_WEIGHT:
+        return {"bank_id": bank_id, "bank_name": "Crytpo Bank", "country": None}
+    if roll < CRYPTO_WEIGHT + USA_WEIGHT:
+        city = random.choice(US_CITIES)
+        pattern = random.choice(US_PATTERNS)
+        return {"bank_id": bank_id, "bank_name": pattern.format(city=city), "country": "usa"}
+    country = random.choice(COUNTRIES)
+    return {"bank_id": bank_id, "bank_name": f"{country.title()} Bank #{bank_id}", "country": country}
+
+
+banks = [make_bank(1000 + i) for i in range(N_BANKS)]
+
+
+def random_bank():
+    return random.choice(banks)
+
+
+def new_account_number():
+    return uuid.uuid4().hex[:9].upper()
+
+
+# ---------------------------------------------------------------------------
+# 2. Legit background accounts + noise transactions
+# ---------------------------------------------------------------------------
+
+account_rows = []      # -> HI-Small_accounts.csv
+account_bank = {}      # account_number -> bank dict, for quick lookup
+
+legit_accounts = []
+for _ in range(N_LEGIT_ACCOUNTS):
+    bank = random_bank()
+    acc_num = new_account_number()
+    legit_accounts.append((bank["bank_id"], acc_num))
+    account_bank[acc_num] = bank
+    account_rows.append({
+        "Bank ID": bank["bank_id"], "Account Number": acc_num,
+        "Bank Name": bank["bank_name"], "Country": bank["country"],
+    })
+
+# Hard negatives: a chunk of legit accounts that only ever receive (never
+# send), same trait real cash-out nodes have - stops the model from
+# learning "out_degree == 0" as a free shortcut.
+n_receive_only = max(1, int(N_LEGIT_ACCOUNTS * 0.12))
+receive_only = set(random.sample(range(len(legit_accounts)), n_receive_only))
+sender_pool = [a for i, a in enumerate(legit_accounts) if i not in receive_only]
+
+trans_rows = []  # -> HI-Small_Trans.csv
+
+
+def make_txn(t, from_bank, from_acc, to_bank, to_acc, amount, is_laundering):
+    currency = random.choice(CURRENCIES)
+    payment_format = "Bitcoin" if currency == "Bitcoin" else random.choice(PAYMENT_FORMATS)
     return {
-        "account_id": f"ACC-{uuid.uuid4().hex[:10].upper()}",
-        "account_type": acct_type,       # victim | mule | legit | cashout_node
-        "holder_name": fake.name(),
-        "bank": random.choice(BANKS),
-        "branch_city": city_name,
-        "latitude": round(lat, 5),
-        "longitude": round(lon, 5),
-        "kyc_completeness": round(random.uniform(0.2, 1.0), 2) if acct_type == "mule" else round(random.uniform(0.7, 1.0), 2),
-        "account_age_days": account_age_days,
-        "opened_on": opened_on.date().isoformat(),
-        "prior_fraud_flag": acct_type == "mule" and random.random() < 0.35,
+        "Timestamp": fmt_ts(t),
+        "From Bank": from_bank,
+        "From Account": from_acc,
+        "To Bank": to_bank,
+        "To Account": to_acc,
+        "Amount Received": amount,
+        "Receiving Currency": currency,
+        "Amount Paid": amount,
+        "Payment Currency": currency,
+        "Payment Format": payment_format,
+        "Is Laundering": int(is_laundering),
     }
 
 
-# ---------------------------------------------------------------------------
-# 1. Background "legit" accounts + noise transactions (non-fraud graph mass)
-# ---------------------------------------------------------------------------
-
-accounts = {}
-transactions = []
-
-legit_accounts = [new_account("legit") for _ in range(N_LEGIT_ACCOUNTS)]
-for a in legit_accounts:
-    accounts[a["account_id"]] = a
-
-legit_ids = list(accounts.keys())
 for _ in range(N_LEGIT_TXNS):
-    a, b = random.sample(legit_ids, 2)
-    transactions.append({
-        "txn_id": f"TXN-{uuid.uuid4().hex[:10].upper()}",
-        "from_account": a,
-        "to_account": b,
-        "amount": round(random.uniform(200, 50000), 2),
-        "channel": random.choice(CHANNELS),
-        "timestamp": random_time().isoformat(),
-        "is_fraud_chain": False,
-        "is_cashout": False,
+    from_bank, from_acc = random.choice(sender_pool)
+    to_bank, to_acc = random.choice(legit_accounts)
+    if from_acc == to_acc:
+        continue
+    trans_rows.append(make_txn(
+        random_time(), from_bank, from_acc, to_bank, to_acc,
+        round(random.uniform(50, 20000), 2), is_laundering=False,
+    ))
+
+# Accounts that will later be used as mule/cash-out nodes in a laundering
+# chain, reserved now so we can also route some ordinary-looking noise
+# transactions through them below. Real mule accounts usually have some
+# mundane transaction history too - without this, "total transaction
+# count" alone trivially separates fraud accounts from everything else,
+# which makes the detection problem unrealistically easy.
+n_fraud_accounts_estimate = N_LAUNDERING_ATTEMPTS * (MAX_HOPS + 1)
+pre_seeded_fraud_accounts = []
+for _ in range(n_fraud_accounts_estimate):
+    bank = random_bank()
+    acc = new_account_number()
+    account_bank[acc] = bank
+    account_rows.append({
+        "Bank ID": bank["bank_id"], "Account Number": acc,
+        "Bank Name": bank["bank_name"], "Country": bank["country"],
+    })
+    pre_seeded_fraud_accounts.append((bank["bank_id"], acc))
+
+noise_pool = legit_accounts + pre_seeded_fraud_accounts
+n_mixed_noise_txns = int(N_LEGIT_TXNS * 0.35)
+for _ in range(n_mixed_noise_txns):
+    from_bank, from_acc = random.choice(noise_pool)
+    to_bank, to_acc = random.choice(noise_pool)
+    if from_acc == to_acc:
+        continue
+    trans_rows.append(make_txn(
+        random_time(), from_bank, from_acc, to_bank, to_acc,
+        round(random.uniform(50, 20000), 2), is_laundering=False,
+    ))
+
+fraud_account_cursor = 0
+
+# ---------------------------------------------------------------------------
+# 3. Laundering attempts (fraud rings): victim -> mule -> ... -> cash-out
+# ---------------------------------------------------------------------------
+
+patterns_lines = []
+
+
+def txn_to_pattern_row(txn):
+    # Same 11 fields, comma-separated, no header - exactly what
+    # train_model_real.py's Patterns.txt parser expects per line.
+    return ",".join(str(txn[k]) for k in [
+        "Timestamp", "From Bank", "From Account", "To Bank", "To Account",
+        "Amount Received", "Receiving Currency", "Amount Paid",
+        "Payment Currency", "Payment Format", "Is Laundering",
+    ])
+
+
+complaint_like_rows = []  # small extra summary file, handy for a dashboard demo
+
+for ring_idx in range(N_LAUNDERING_ATTEMPTS):
+    fraud_type = random.choice(FRAUD_TYPES)
+
+    victim_bank = random_bank()
+    victim_acc = new_account_number()
+    account_bank[victim_acc] = victim_bank
+    account_rows.append({
+        "Bank ID": victim_bank["bank_id"], "Account Number": victim_acc,
+        "Bank Name": victim_bank["bank_name"], "Country": victim_bank["country"],
     })
 
-# ---------------------------------------------------------------------------
-# 2. Fraud rings: victim -> mule hop -> mule hop -> ... -> cash-out node
-# ---------------------------------------------------------------------------
-
-complaints = []
-cashouts = []
-
-for ring_idx in range(N_FRAUD_RINGS):
-    fraud_type = random.choice(FRAUD_TYPES)
-    victim_city = random.choice(CITIES)
-    victim = new_account("victim", city=victim_city)
-    accounts[victim["account_id"]] = victim
-
     n_hops = random.randint(MIN_HOPS, MAX_HOPS)
-    fraud_start_time = random_time(START_DATE, END_DATE - timedelta(days=2))
+    t = random_time(START_DATE, END_DATE - timedelta(days=2))
     chain_amount = round(random.uniform(15000, 500000), 2)
 
-    # modus-operandi shapes how far (geographically) the chain tends to travel
-    if fraud_type in ("Investment fraud", "Digital arrest scam"):
-        travel_bias = 0.85   # tends to route far from victim's city
-    else:
-        travel_bias = 0.5
-
-    prev_account = victim
-    chain_accounts = [victim]
-    t = fraud_start_time
+    prev_bank, prev_acc = victim_bank["bank_id"], victim_acc
+    ring_txn_rows = []
 
     for hop in range(n_hops):
         is_last_hop = hop == n_hops - 1
-        if is_last_hop:
-            # cash-out node: location chosen with travel_bias determining
-            # how far from the victim's city it tends to be
-            if random.random() < travel_bias:
-                cashout_city = random.choice([c for c in CITIES if c[0] != victim_city[0]])
-            else:
-                cashout_city = victim_city
-            node = new_account("cashout_node", city=cashout_city, opened_before=t)
-        else:
-            mule_city = random.choice(CITIES)
-            node = new_account("mule", city=mule_city, opened_before=t)
-
-        accounts[node["account_id"]] = node
+        bank_id, acc = pre_seeded_fraud_accounts[fraud_account_cursor]
+        bank = account_bank[acc]
+        fraud_account_cursor += 1
 
         t = t + timedelta(minutes=random.randint(10, 600))
-        hop_amount = round(chain_amount * random.uniform(0.75, 0.98), 2)
-        chain_amount = hop_amount  # layering typically skims a little each hop
+        chain_amount = round(chain_amount * random.uniform(0.75, 0.98), 2)
 
-        txn = {
-            "txn_id": f"TXN-{uuid.uuid4().hex[:10].upper()}",
-            "from_account": prev_account["account_id"],
-            "to_account": node["account_id"],
-            "amount": hop_amount,
-            "channel": random.choice(CHANNELS),
-            "timestamp": t.isoformat(),
-            "is_fraud_chain": True,
-            "is_cashout": is_last_hop,
-            "ring_id": ring_idx,
-        }
-        transactions.append(txn)
+        txn = make_txn(t, prev_bank, prev_acc, bank["bank_id"], acc, chain_amount, is_laundering=True)
+        trans_rows.append(txn)
+        ring_txn_rows.append(txn)
 
         if is_last_hop:
-            cashouts.append({
+            complaint_like_rows.append({
+                "complaint_id": f"NCRP-{100000 + ring_idx}",
                 "ring_id": ring_idx,
-                "cashout_account": node["account_id"],
-                "cashout_txn": txn["txn_id"],
-                "cashout_city": cashout_city[0],
-                "cashout_latitude": node["latitude"],
-                "cashout_longitude": node["longitude"],
-                "cashout_timestamp": t.isoformat(),
-                "hops_from_victim": n_hops,
-                "amount_withdrawn": hop_amount,
+                "fraud_type": fraud_type,
+                "victim_bank_id": victim_bank["bank_id"],
+                "victim_account": victim_acc,
+                "cashout_bank_id": bank["bank_id"],
+                "cashout_account": acc,
+                "cashout_bank_name": bank["bank_name"],
+                "cashout_country": bank["country"],
+                "amount_withdrawn": chain_amount,
+                "hops": n_hops,
+                "filed_at": fmt_ts(t + timedelta(hours=random.randint(1, 48))),
             })
 
-        prev_account = node
-        chain_accounts.append(node)
+        prev_bank, prev_acc = bank["bank_id"], acc
 
-    complaint_filed_at = fraud_start_time + timedelta(hours=random.randint(1, 48))
-    complaints.append({
-        "complaint_id": f"NCRP-{100000 + ring_idx}",
-        "ring_id": ring_idx,
-        "victim_account": victim["account_id"],
-        "victim_city": victim_city[0],
-        "fraud_type": fraud_type,
-        "reported_loss": chain_accounts[0] and round(random.uniform(15000, 500000), 2),
-        "filed_at": complaint_filed_at.isoformat(),
-        "fraud_start_at": fraud_start_time.isoformat(),
-    })
+    patterns_lines.append(f"BEGIN LAUNDERING ATTEMPT - STACK")
+    for txn in ring_txn_rows:
+        patterns_lines.append(txn_to_pattern_row(txn))
+    patterns_lines.append(f"END LAUNDERING ATTEMPT - STACK")
 
 # ---------------------------------------------------------------------------
-# 3. Write outputs
+# 4. Write outputs
 # ---------------------------------------------------------------------------
 
-import os
-os.makedirs("output", exist_ok=True)
+os.makedirs(OUT_DIR, exist_ok=True)
 
-accounts_df = pd.DataFrame(accounts.values())
-transactions_df = pd.DataFrame(transactions)
-complaints_df = pd.DataFrame(complaints)
-cashouts_df = pd.DataFrame(cashouts)
+trans_df = pd.DataFrame(trans_rows)[[
+    "Timestamp", "From Bank", "From Account", "To Bank", "To Account",
+    "Amount Received", "Receiving Currency", "Amount Paid",
+    "Payment Currency", "Payment Format", "Is Laundering",
+]]
+trans_path = f"{OUT_DIR}/{DATASET_PREFIX}_Trans.csv"
+trans_df.to_csv(trans_path, index=False)
 
-accounts_df.to_csv("output/accounts.csv", index=False)
-transactions_df.to_csv("output/transactions.csv", index=False)
-complaints_df.to_csv("output/complaints.csv", index=False)
-cashouts_df.to_csv("output/cashouts.csv", index=False)
+accounts_df = pd.DataFrame(account_rows).drop_duplicates(subset=["Bank ID", "Account Number"])
+accounts_path = f"{OUT_DIR}/{DATASET_PREFIX}_accounts.csv"
+accounts_df.to_csv(accounts_path, index=False)
 
-print(f"accounts:      {len(accounts_df):>6}")
-print(f"transactions:  {len(transactions_df):>6}  (fraud-chain: {transactions_df['is_fraud_chain'].sum()})")
-print(f"complaints:    {len(complaints_df):>6}")
-print(f"cashouts:      {len(cashouts_df):>6}")
+patterns_path = f"{OUT_DIR}/{DATASET_PREFIX}_Patterns.txt"
+with open(patterns_path, "w") as f:
+    f.write("\n".join(patterns_lines) + "\n")
 
-# ---------------------------------------------------------------------------
-# 4. Visualize one example fraud ring
-# ---------------------------------------------------------------------------
+complaints_df = pd.DataFrame(complaint_like_rows)
+complaints_path = f"{OUT_DIR}/{DATASET_PREFIX}_complaints_demo.csv"
+complaints_df.to_csv(complaints_path, index=False)
 
-example_ring_id = 0
-ring_txns = transactions_df[transactions_df.get("ring_id") == example_ring_id]
-
-G = nx.DiGraph()
-for _, row in ring_txns.iterrows():
-    G.add_edge(row["from_account"], row["to_account"], amount=row["amount"])
-
-pos = nx.spring_layout(G, seed=1, k=1.6)
-plt.figure(figsize=(9, 5))
-
-node_colors = []
-for n in G.nodes():
-    acc_type = accounts[n]["account_type"]
-    node_colors.append({
-        "victim": "#1E2761",
-        "mule": "#CADCFC",
-        "cashout_node": "#D85A30",
-    }.get(acc_type, "#AAAAAA"))
-
-nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=900, edgecolors="#333333")
-nx.draw_networkx_edges(G, pos, arrowstyle="-|>", arrowsize=18, edge_color="#5A6178", width=1.6)
-labels = {n: accounts[n]["account_type"] for n in G.nodes()}
-nx.draw_networkx_labels(G, pos, labels=labels, font_size=8, font_color="white")
-
-edge_labels = {(u, v): f"\u20b9{d['amount']:,.0f}" for u, v, d in G.edges(data=True)}
-nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=7)
-
-plt.title(f"Example fraud ring #{example_ring_id} \u2014 money trail from victim to cash-out")
-plt.axis("off")
-plt.tight_layout()
-plt.savefig("output/example_ring.png", dpi=150)
-print("saved output/example_ring.png")
+print(f"wrote {trans_path}       ({len(trans_df):,} transactions, "
+      f"{trans_df['Is Laundering'].sum():,} laundering)")
+print(f"wrote {accounts_path}    ({len(accounts_df):,} accounts)")
+print(f"wrote {patterns_path}    ({N_LAUNDERING_ATTEMPTS} laundering attempts)")
+print(f"wrote {complaints_path}  (demo/dashboard summary, not read by train_model_real.py)")

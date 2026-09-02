@@ -273,10 +273,10 @@
     <div class="grid-2">
       <div class="card">
         <div class="section-head">
-          <div class="section-title">Top risk alerts</div>
+          <div class="section-title">Latest risk alerts</div>
           <div class="section-note">from /api/alerts</div>
         </div>
-        <div id="overviewAlerts"><div class="empty">Connect to the API to load ranked alerts.</div></div>
+        <div id="overviewAlerts"><div class="empty">Connect to the API to load the latest alerts.</div></div>
       </div>
       <div class="card">
         <div class="section-head">
@@ -305,7 +305,7 @@
   <!-- ALERTS -->
   <div class="panel" id="panel-alerts">
     <div class="section-head">
-      <div class="section-title">Ranked risk alerts</div>
+      <div class="section-title">Latest risk alerts</div>
       <div class="section-note" id="alertsCount">from /api/alerts</div>
     </div>
     <div id="alertsList"><div class="empty">Connect to the API to load risk alerts.</div></div>
@@ -459,13 +459,13 @@ function riskColor(score){
 }
 
 async function loadAlerts(){
+  // /api/alerts now returns accounts newest-first (by last activity), not
+  // ranked by risk score — so we render exactly what the API gives us.
   const data = await apiGet('/api/alerts?top_k=25');
-  $('alertsCount').textContent = data.count + ' accounts flagged – from /api/alerts';
-  
-  const latestAlerts = [...data.alerts].reverse();
+  $('alertsCount').textContent = data.count + ' accounts flagged – latest first, from /api/alerts';
 
-  renderAlerts(latestAlerts, $('alertsList'));
-  renderAlerts(latestAlerts.slice(0,6), $('overviewAlerts'));
+  renderAlerts(data.alerts, $('alertsList'));
+  renderAlerts(data.alerts.slice(0,6), $('overviewAlerts'));
 }
 
 function renderAlerts(alerts, target){
@@ -484,7 +484,7 @@ function renderAlerts(alerts, target){
         <div class="alert-acct">${a.account_id}</div>
         <div class="alert-expl">${a.explanation}</div>
       </div>
-      <div class="alert-meta">${a.bank || ''}<br>${a.city || ''}</div>
+      <div class="alert-meta">${a.flagged_at ? fmtTime(a.flagged_at) : ''}<br>${a.bank || ''} · ${a.city || ''}</div>
     `;
     target.appendChild(card);
   });

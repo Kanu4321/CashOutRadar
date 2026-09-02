@@ -1,73 +1,111 @@
-# Cash-out Radar — full stack, wired up
+Markdown
+# Cash-out Radar
 
-You had three separate pieces that didn't connect yet:
+**Real-Time Cybercrime Ring Forensics & Mule-Account Interception Engine**
 
-1. **`generate.py`** → synthetic data (`output/*.csv`) — already generated for you.
-2. **`main.py`** → FastAPI backend — but it wouldn't start, because it
-   loads `output/training_table.csv` and `models/*.joblib`, and nothing
-   in either of your zips produced them.
-3. **`index.html`** → the dashboard frontend — already correctly wired
-   to call `http://localhost:8000/api/...` and `ws://localhost:8000/ws/live`,
-   it just had no backend to talk to.
+Cash-out Radar is an intelligence console engineered to dismantle organized financial cybercrime networks. Designed around modern money-mule laundering typologies, it reconstructs multi-hop transaction trails from initial victim complaints, predicts downstream terminal cash-out points via graph-augmented machine learning, and maintains a cryptographically verifiable evidentiary log.
 
-The missing link was a training script. I added **`train_model.py`**,
-which reads the generated CSVs, builds the same features `main.py`
-expects (`pagerank`, `in_degree`, `out_degree`, `kyc_completeness`,
-`account_age_days`, `prior_fraud_flag`), trains the XGBoost cash-out
-risk model, and fits the hotspot density model — using NetworkX
-PageRank as a fallback if you haven't loaded the data into Neo4j
-(`neo4j_load.py` is still here and optional; if you run it first,
-`train_model.py` will detect `output/graph_features.csv` and use the
-real GDS PageRank instead).
+---
 
-I ran the feature-engineering and model-fitting logic here to confirm
-it produces a clean `training_table.csv` (1124 rows, 60 positives, no
-missing values) and a working hotspot grid. I couldn't pip-install
-`xgboost`/`fastapi`/`shap` inside this sandbox (no network egress), so
-I verified the same logic with a NetworkX + scikit-learn stand-in
-model rather than running the literal final script — the code you're
-getting uses the real `xgboost`/`shap` stack from `requirements.txt`,
-which is what `main.py` expects. Run the steps below locally to do the
-final live check.
+### Core Architecture
 
-## Run it
+[ Synthetic NCRP Ledger Engine ]
+│
+▼
+[ NetworkX / Neo4j GDS ] ────────► Topological Features (PageRank, In/Out-Degree)
+│
+▼
+[ XGBoost Classifier ] ───────► Risk Probability Scoring
+│
+▼
+[ TreeSHAP Explainability ] ───► Forensic Drivers per Flagged Node
+│
+▼
+[ FastAPI Backend (Render) ] ───► REST Endpoints + WebSocket Ticker
+│
+▼
+[ Vanilla SPA (Vercel CDN) ] ───► Force-Directed Ring Topology & Spatial KDE
 
+
+* **Network Topology & Flow Analysis:** Models smurfing and rapid fan-out structures across intermediate mule tiers using directed graph metrics (NetworkX baseline with optional Neo4j Graph Data Science offload).
+* **Predictive Cash-Out Pinpointing:** Uses gradient-boosted decision trees (`XGBoost`) trained on graph centrality and structural transaction metadata to distinguish routing intermediaries from terminal cash-out nodes.
+* **Explainable AI Justification:** Implements `SHAP` (SHapley Additive exPlanations) to decompose high-risk predictions into compliant legal justifications (e.g., degree anomalies, rapid balance dispersal) before dispatching freezing alerts.
+* **Forensic Tamper Resistance:** Maintains an append-only audit trail chained via SHA-256 block hashing, enabling mathematical verification of evidentiary integrity.
+* **Decoupled Deployment:** Zero-build static frontend deployed globally on edge CDNs (Vercel), interfacing with an asynchronous backend service (FastAPI on Render).
+
+---
+
+### Project Structure
+
+cash-out-radar/
+├── generate.py           # Synthetic ledger & NCRP complaint generation engine
+├── train_model.py        # Feature engineering, XGBoost training, & spatial KDE fitting
+├── main.py               # Asynchronous FastAPI engine, WebSocket feeds, and REST routes
+├── neo4j_load.py         # Optional enterprise loader for Neo4j GDS algorithms
+├── index.html            # High-performance dashboard (D3-force, SVG canvas, vanilla JS)
+├── requirements.txt      # Production runtime dependencies
+├── models/               # Serialized model artifacts (.joblib)
+└── output/               # Structured transaction ledgers (.csv)
+
+
+---
+
+### Key Operational Metrics
+
+| Metric | Target Value | Description |
+|---|---|---|
+| **Avg Hop Distance** | `4.4 hops` | Mean path length from victim origination to terminal extraction node. |
+| **Audit Verification** | `SHA-256 Chain` | Mathematical proof against log tampering or backdated alteration. |
+| **Explanation Latency** | `< 20ms` | Real-time TreeSHAP contribution computation per high-risk node. |
+| **Topology Engine** | `D3 Force Simulation` | Dynamic physics-driven multi-layer node graph rendering. |
+
+---
+
+### Local Installation & Reproduction
+
+**1. Clone and Configure Environment**
 ```bash
+git clone [https://github.com/your-username/cash-out-radar.git](https://github.com/your-username/cash-out-radar.git)
+cd cash-out-radar
+python -m venv venv
+# Linux / macOS
+source venv/bin/activate
+# Windows
+.\venv\Scripts\activate
 pip install -r requirements.txt
-
-# 1. (data is already in output/, but to regenerate:)
-python3 generate.py
-
-# 2. (optional) load into Neo4j for real graph algorithms - see README_NEO4J.md
-#    python3 neo4j_load.py
-
-# 3. train the models (the piece that was missing)
-python3 train_model.py
-
-# 4. run the API
-uvicorn main:app --reload --port 8000
 ```
+**2. Generate Graph Ledgers & Fit Models**
 
-Then open `index.html` directly in your browser (double-click it, or
-`python3 -m http.server 5500` and visit it) — the API base field at
-the top already defaults to `http://localhost:8000`, so it should
-light up immediately: stats, live complaint feed, risk alerts, hotspot
-map, fraud-ring graph view, and the tamper-evident audit log.
+Bash
+# Generate synthetic accounts, layering hops, and NCRP incident reports
+python generate.py
 
-## Files
+# Optional: Load into local Neo4j instance for enterprise GDS metrics
+# python neo4j_load.py
 
-| File | Role |
-|---|---|
-| `generate.py` | synthetic NCRP-style dataset generator |
-| `output/*.csv` | pre-generated data (accounts, transactions, complaints, cashouts) |
-| `neo4j_load.py` | optional: loads data into Neo4j, runs PageRank/Louvain/FastRP |
-| `train_model.py` | **new** — builds `training_table.csv`, trains the risk model, fits the hotspot KDE |
-| `main.py` | FastAPI backend serving the dashboard |
-| `index.html` | the dashboard itself (static, no build step) |
+# Extract graph centrality features, fit XGBoost, and cache spatial KDE grid
+python train_model.py
 
-## Honest note (carried over from the original README)
+**3. Launch Backend Engine**
 
-On this synthetic data the risk model scores near-perfect
-precision/recall — that's because cash-out accounts sit at a
-structurally distinctive in/out-degree combination in the generator,
-not a realistic result. Say that plainly in a demo.
+Bash
+uvicorn main:app --reload --port 8000
+
+**4. Serve Dashboard**
+
+Bash
+# Serve frontend via local HTTP server
+python -m http.server 5500
+Navigate to http://localhost:5500 or configure the live production endpoint directly in the console header.
+
+System Capabilities
+Human-in-the-Loop (HITL) Triaging: Eliminates autonomous freezing liability risks by providing fraud analysts with instantaneous evidentiary context rather than rigid black-box decisions.
+
+Spatial Hotspot Heatmaps: Visualizes jurisdictional cybercrime clusters using two-dimensional Kernel Density Estimation over geographic coordinates.
+
+Interactive Money Trails: Traces individual complaints from root victims through arbitrary mule layers to terminal ATM/point-of-sale cashouts via interactive SVG vector graphs.
+
+Methodological Transparency
+Demonstration Caveat:
+
+The high classification metrics obtained on the current benchmark dataset reflect structural topological separation inherent to synthetic smurfing patterns (e.g., tightly bounded in-degree to out-degree ratios for sink accounts). In real-world core banking feeds, operational noise, dormancy periods, and blended organic transactions yield continuous feature drift, requiring regular retraining pipelines and dynamic boundary tuning.

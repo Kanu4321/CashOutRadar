@@ -48,9 +48,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 from faker import Faker
 
-random.seed(42)
 fake = Faker("en_US")
-Faker.seed(42)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -59,10 +57,27 @@ Faker.seed(42)
 OUT_DIR = os.environ.get("OUT_DIR", "kaggle_data")
 DATASET_PREFIX = os.environ.get("DATASET_PREFIX", "HI-Small")
 
+# Each prefix gets its own size AND its own random seed, so "Small" vs
+# "Medium" vs "Large" are actually different datasets, not the same data
+# wearing a different filename. Real Kaggle HI-Small/Medium/Large differ
+# by roughly this kind of order-of-magnitude jump, so this mirrors that.
+SIZE_PRESETS = {
+    "HI-Small":  {"n_legit_accounts": 1800,  "n_legit_txns": 9000,   "n_laundering": 90,  "seed": 42},
+    "HI-Medium": {"n_legit_accounts": 9000,  "n_legit_txns": 45000,  "n_laundering": 450, "seed": 142},
+    "HI-Large":  {"n_legit_accounts": 36000, "n_legit_txns": 180000, "n_laundering": 1800, "seed": 242},
+}
+preset = SIZE_PRESETS.get(DATASET_PREFIX, SIZE_PRESETS["HI-Small"])
+if DATASET_PREFIX not in SIZE_PRESETS:
+    print(f"Warning: unrecognized DATASET_PREFIX '{DATASET_PREFIX}', "
+          f"falling back to HI-Small sizing.")
+
+random.seed(preset["seed"])
+Faker.seed(preset["seed"])
+
 N_BANKS = 250
-N_LEGIT_ACCOUNTS = 1800
-N_LEGIT_TXNS = 9000
-N_LAUNDERING_ATTEMPTS = 90     # each = one fraud ring / one complaint's money trail
+N_LEGIT_ACCOUNTS = preset["n_legit_accounts"]
+N_LEGIT_TXNS = preset["n_legit_txns"]
+N_LAUNDERING_ATTEMPTS = preset["n_laundering"]     # each = one fraud ring / one complaint's money trail
 MIN_HOPS, MAX_HOPS = 3, 6
 START_DATE = datetime(2026, 1, 1)
 END_DATE = datetime(2026, 8, 31)
@@ -331,4 +346,4 @@ print(f"wrote {trans_path}       ({len(trans_df):,} transactions, "
       f"{trans_df['Is Laundering'].sum():,} laundering)")
 print(f"wrote {accounts_path}    ({len(accounts_df):,} accounts)")
 print(f"wrote {patterns_path}    ({N_LAUNDERING_ATTEMPTS} laundering attempts)")
-print(f"wrote {complaints_path}  (demo/dashboard summary, not read by train_model_real.py)")
+print(f"wrote {complaints_path}  (demo/dashboard summary, not read by train_model_real.py)")    

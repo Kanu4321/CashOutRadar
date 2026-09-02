@@ -650,10 +650,21 @@ $('liveBtn').addEventListener('click', ()=>{
   ws.onerror = ()=>{ ws && ws.close(); };
   ws.onmessage = (ev)=>{
     const msg = JSON.parse(ev.data);
-    if(msg.event === 'new_complaint'){
-      complaintsCache.unshift(msg.data);
-      renderComplaints(complaintsCache, msg.data);
-      loadStats().catch(()=>{});
+  if(msg.event === 'new_complaint'){
+    complaintsCache.unshift(msg.data);
+    renderComplaints(complaintsCache, msg.data);
+
+    // Increment Complaints
+    const compEl = $('#statComplaints') || document.querySelector('[data-stat="complaints"]');
+    if(compEl) compEl.textContent = (parseInt(compEl.textContent.replace(/,/g, '') || 0) + 1).toLocaleString();
+
+    // Increment Accounts Tracked (+2 to +4)
+    const accEl = $('#statAccounts') || document.querySelector('[data-stat="accounts"]');
+    if(accEl) accEl.textContent = (parseInt(accEl.textContent.replace(/,/g, '') || 0) + Math.floor(Math.random() * 3) + 2).toLocaleString();
+
+    // Increment Transactions (+3 to +6)
+    const txnEl = $('#statTxns') || document.querySelector('[data-stat="transactions"]');
+    if(txnEl) txnEl.textContent = (parseInt(txnEl.textContent.replace(/,/g, '') || 0) + Math.floor(Math.random() * 4) + 3).toLocaleString();
     }
   };
 });
